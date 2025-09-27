@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon>resources\program_icon.ico</ApplicationIcon>
+    <StartupObject>Program</StartupObject>
+  
+    <!-- Explorer → Details -->
+  <Company>Marcel van den Bosch</Company>              <!-- "Company" -->
+  <Product>Marcel's Math and Number Quiz</Product>               <!-- "Product name" -->
+  <Title>Marcel's Math and Number Quiz</Title>                   <!-- "File description" -->
+  <Description>This quiz practices your mental math, number sequences and more complex calculations</Description>
+  <Copyright>2025 Marcel van den Bosch</Copyright>
+
+  <!-- Versions -->
+  <AssemblyVersion>1.0.0.0</AssemblyVersion>      <!-- Assembly version -->
+  <FileVersion>1.0.0.0</FileVersion>              <!-- "File version" -->
+  <InformationalVersion>1.0.0</InformationalVersion> <!-- "Product version" -->
+
+  <!-- EXE filename (also editable via Properties → Application) -->
+  <AssemblyName>MarcelMathNumberQuiz</AssemblyName>
+
+  <!-- Optional, but usually leave this as default (true) -->
+  <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+  
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="resources\program_icon.ico" />
+  </ItemGroup>
+
+</Project>
