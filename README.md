@@ -3,8 +3,11 @@
 Een **console-gebaseerde quiz game** om wiskunde, nummerreeksen en hoofdrekenen te oefenen —  
 gebouwd in C# en geïnspireerd door de look & feel van klassieke `ncurses` interfaces.
 
-![screenshot](docs/screenshot.png)
+![screenshot](docs/screenshot2.png)
 
+![screenshot](docs/screenshot1.png)
+
+![screenshot](docs/screenshot3.png)
 ---
 
 ## ✨ Functies
