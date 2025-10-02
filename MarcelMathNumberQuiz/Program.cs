@@ -53,6 +53,9 @@ public class App
                 case 3:
                     new BasicMentalQuiz(_ui, new MentalMathGenerator()).Run();// MentalMath
                     break;
+                case 4:
+                    new SquaresQuiz(_ui).Run();              // Kwadraten & Wortels
+                    break;
             }
         }
     }
@@ -65,6 +68,7 @@ public class App
             "⏵ Rekensommen (breuken, %, verhoudingen)",
             "⏵ Nummerreeksen (IQSequences)",
             "⏵ Hoofdrekenen (optel/af/×/÷/macht/wortel)",
+            "⏵ Kwadraten & Wortels (n², √n)",
             "⏻ Afsluiten"
         };
         int sel = 0;

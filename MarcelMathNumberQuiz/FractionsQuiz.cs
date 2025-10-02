@@ -1,622 +1,626 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 
-namespace MarcelMathNumberQuiz
+/// <summary>
+/// Type-categorieën die in het menu getoond worden.
+/// </summary>
+public enum ProblemType
 {
-    public enum ProblemType
+    // Procenten
+    PercentageOfNumber,         // p% van N = ?
+    Percentage_FindPercent,     // ?% van N = M
+    Percentage_FindBase,        // p% van ? = M
+    Percentage_WhatPercent,     // A is ?% van B
+
+    // Breuken i.c.m. hele getallen
+    Fraction_Multiply_ByInt,    // a/b × n
+    Fraction_Add_Int,           // a/b ± n
+
+    // Nieuwe breuk-varianten
+    Fraction_Multiply,          // a/b × c/d
+    Fraction_Divide,            // a/b ÷ c/d
+    Fraction_Add,               // a/b + c/d
+    Fraction_Subtract,          // a/b − c/d
+
+    // Verhoudingen
+    Ratio_CrossSolve,           // a/? = ?/b
+
+    // Algemene rekenexpressie
+    Arithmetic_Expression
+}
+
+/// <summary>
+/// Vraagmodel
+/// </summary>
+public class Question
+{
+    public string QuestionText { get; }
+    public List<string> Options { get; }
+    public string CorrectAnswer { get; }
+    public string Explanation { get; }
+    public ProblemType Type { get; }
+
+    public Question(string questionText, string correctAnswer, IEnumerable<string> options, string explanation, ProblemType type)
     {
-        FractionDivideByInteger,
-        FractionMultiplyByInteger,
-        FractionAdd,
-        FractionSubtract,
-        FractionMultiply,
-        FractionDivide,
-        FractionSimplify,
-        PercentageOfNumber,
-        PartOfNumber,
-        RatioProportion,
-        SquaresRoots,
-        OrderOfOperations,
-        // Extra:
-        NegativesWithBrackets,
-        MixedToImproper,
-        ImproperToMixed,
-        WorkRateTogether,
-        // NIEUW:
-        ProportionSameUnknown   // a/? = ?/b  (of ?/a = b/?)
+        QuestionText = questionText;
+        CorrectAnswer = correctAnswer;
+        Options = options.ToList();
+        Explanation = explanation ?? "";
+        Type = type;
+    }
+}
+
+/// <summary>
+/// Generator voor rekensommen (procenten, breuken, verhoudingen, etc.)
+/// </summary>
+public class HfmVitQuestionGenerator
+{
+    private readonly Random _rng;
+    public HfmVitQuestionGenerator(int? seed = null) => _rng = seed.HasValue ? new Random(seed.Value) : new Random();
+
+    /// <summary>Publieke entry</summary>
+    public Question Generate(ProblemType type) =>
+        type switch
+        {
+            // Procenten
+            ProblemType.PercentageOfNumber => GenPercentageOfNumber(),
+            ProblemType.Percentage_FindPercent => GenFindPercentGivenResult(),
+            ProblemType.Percentage_FindBase => GenFindBaseGivenPercent(),
+            ProblemType.Percentage_WhatPercent => GenWhatPercentOfNumber(),
+
+            // Breuken met int
+            ProblemType.Fraction_Multiply_ByInt => GenFractionTimesInteger(),
+            ProblemType.Fraction_Add_Int => GenFractionPlusMinusInteger(),
+
+            // Nieuwe breuk-varianten
+            ProblemType.Fraction_Multiply => GenFractionTimesFraction(),
+            ProblemType.Fraction_Divide => GenFractionDivideFraction(),
+            ProblemType.Fraction_Add => GenFractionPlusFraction(),
+            ProblemType.Fraction_Subtract => GenFractionMinusFraction(),
+
+            // Verhoudingen
+            ProblemType.Ratio_CrossSolve => GenRatioCrossSolve(),
+
+            // Algemene expressie
+            ProblemType.Arithmetic_Expression => GenArithmeticExpression(),
+
+            _ => GenPercentageOfNumber()
+        };
+
+    /* ================== Helpers ================== */
+
+    // NL-weergave: integer zonder komma; anders max 2 decimalen; '.' -> ','
+    private static string FmtDec(decimal v)
+    {
+        string s = v % 1m == 0m ? v.ToString("0", CultureInfo.InvariantCulture)
+                                : v.ToString("0.##", CultureInfo.InvariantCulture);
+        return s.Replace('.', ',');
+    }
+    private static string FmtPct(decimal p)
+    {
+        string s = p % 1m == 0m ? p.ToString("0", CultureInfo.InvariantCulture)
+                                : p.ToString("0.##", CultureInfo.InvariantCulture);
+        return s.Replace('.', ',');
+    }
+    private static void Shuffle<T>(IList<T> list, Random rng)
+    {
+        for (int i = list.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (list[i], list[j]) = (list[j], list[i]);
+        }
+    }
+    private static int Gcd(int a, int b)
+    {
+        a = Math.Abs(a); b = Math.Abs(b);
+        while (b != 0) (a, b) = (b, a % b);
+        return a == 0 ? 1 : a;
+    }
+    private static (int num, int den) Simplify(int num, int den)
+    {
+        if (den == 0) return (num, 1);
+        int g = Gcd(num, den);
+        num /= g; den /= g;
+        if (den < 0) { den = -den; num = -num; }
+        return (num, den);
+    }
+    private static string FractionToNiceDecimal(int num, int den)
+    {
+        var (n, d) = Simplify(num, den);
+        decimal v = d == 0 ? 0m : (decimal)n / d;
+        return FmtDec(v);
+    }
+    private (int n, int d) RandProperFraction(int minDen = 3, int maxDen = 12, bool allowNegative = false)
+    {
+        int d = _rng.Next(minDen, maxDen + 1);
+        int n = _rng.Next(1, d);
+        if (allowNegative && _rng.Next(2) == 0) n = -n;
+        return Simplify(n, d);
+    }
+    private static int Lcm(int a, int b) => a / Gcd(a, b) * b;
+
+    /* ============= 1) p% van N = ? ============= */
+    private Question GenPercentageOfNumber()
+    {
+        int[] P = { 5, 10, 12, 15, 20, 25, 30, 33, 40, 50, 60, 66, 75, 80, 90 };
+        int p = P[_rng.Next(P.Length)];
+        int baseN = _rng.Next(40, 401);
+
+        decimal correct = baseN * p / 100m;
+        string correctS = FmtDec(correct);
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void Add(decimal v) { var s = FmtDec(v); if (!opts.Contains(s)) opts.Add(s); }
+
+        Add(correct + 1m); Add(correct - 1m);
+        Add(baseN * (p + 5) / 100m); Add(baseN * (p - 5) / 100m);
+        Add(baseN * (p + 10) / 100m); Add(baseN * (p - 10) / 100m);
+        if (p != 0) Add(baseN / (decimal)p);
+
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
+        {
+            decimal d = _rng.Next(5, 26) / 10m; // 0,5..2,5
+            Add(correct + (_rng.Next(2) == 0 ? -d : d));
+        }
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string qText = $"{p}% van {baseN} = ?";
+        string explanation = $"{baseN} × {p}/100 = {correctS}.";
+
+        return new Question(qText, correctS, list, explanation, ProblemType.PercentageOfNumber);
     }
 
-    public record Question(
-        string QuestionText,
-        string CorrectAnswer,
-        IReadOnlyList<string> Options,
-        string Explanation,
-        ProblemType Type
-    );
-
-    // Kleine fraction helper (altijd vereenvoudigd)
-    public readonly struct Frac : IEquatable<Frac>
+    /* ============= 2) ?% van N = M ============= */
+    private Question GenFindPercentGivenResult()
     {
-        public int N { get; }   // teller
-        public int D { get; }   // noemer (>0)
+        int baseN = _rng.Next(40, 401);
+        int[] P = { 5, 10, 12, 15, 20, 25, 30, 33, 40, 50, 60, 66, 75, 80, 90 };
+        int pTrue = P[_rng.Next(P.Length)];
+        decimal M = baseN * pTrue / 100m;
 
-        public Frac(int numerator, int denominator)
+        decimal correct = 100m * M / baseN;
+        string correctS = FmtPct(correct) + " %";
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void AddPct(decimal v) { var s = FmtPct(v) + " %"; if (!opts.Contains(s)) opts.Add(s); }
+
+        AddPct(correct + 1m); AddPct(correct - 1m);
+        AddPct(correct + 5m); AddPct(correct - 5m);
+        AddPct(correct + 10m); AddPct(correct - 10m);
+
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
         {
-            if (denominator == 0) throw new DivideByZeroException();
-            if (denominator < 0) { numerator = -numerator; denominator = -denominator; }
-            int g = Gcd(Math.Abs(numerator), denominator);
-            N = numerator / g;
-            D = denominator / g;
+            decimal d = _rng.Next(5, 26) / 10m;
+            AddPct(correct + (_rng.Next(2) == 0 ? -d : d));
         }
 
-        public static Frac FromInt(int x) => new Frac(x, 1);
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
 
-        public static Frac operator +(Frac a, Frac b) => new Frac(a.N * b.D + b.N * a.D, a.D * b.D);
-        public static Frac operator -(Frac a, Frac b) => new Frac(a.N * b.D - b.N * a.D, a.D * b.D);
-        public static Frac operator *(Frac a, Frac b) => new Frac(a.N * b.N, a.D * b.D);
-        public static Frac operator /(Frac a, Frac b)
-        {
-            if (b.N == 0) throw new DivideByZeroException();
-            return new Frac(a.N * b.D, a.D * b.N);
-        }
+        string qText = $"?% van {baseN} = {FmtDec(M)}";
+        string explanation = $"p = 100 × {FmtDec(M)}/{FmtDec(baseN)} = {FmtPct(correct)} %.";
 
-        public override string ToString() => D == 1 ? $"{N}" : $"{N}/{D}";
-        public bool Equals(Frac other) => N == other.N && D == other.D;
-        public override int GetHashCode() => HashCode.Combine(N, D);
-
-        public (int whole, Frac proper) ToMixed()
-        {
-            int whole = N / D;
-            int rem = Math.Abs(N % D);
-            return (whole, new Frac(rem, D));
-        }
-
-        public static int Gcd(int a, int b)
-        {
-            while (b != 0) { int t = a % b; a = b; b = t; }
-            return Math.Max(a, 1);
-        }
+        return new Question(qText, correctS, list, explanation, ProblemType.Percentage_FindPercent);
     }
 
-    public class HfmVitQuestionGenerator
+    /* ============= 3) p% van ? = M ============= */
+    private Question GenFindBaseGivenPercent()
     {
-        private readonly Random _rng;
-        public HfmVitQuestionGenerator(int? seed = null) => _rng = seed.HasValue ? new Random(seed.Value) : new Random();
+        int[] P = { 5, 10, 12, 15, 20, 25, 30, 33, 40, 50, 60, 66, 75, 80, 90 };
+        int p = P[_rng.Next(P.Length)];
+        int baseTrue = _rng.Next(40, 401);
+        decimal M = baseTrue * p / 100m;
 
-        // Format decimal als NL-weergave: 16 of 15,5 of 15,25
-        private static string FmtDec(decimal v)
+        decimal correct = 100m * M / p;
+        string correctS = FmtDec(correct);
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void Add(decimal v) { var s = FmtDec(v); if (!opts.Contains(s)) opts.Add(s); }
+
+        Add(correct + 1m); Add(correct - 1m);
+        Add(correct + 5m); Add(correct - 5m);
+        Add(correct * 110m / 100m); Add(correct * 90m / 100m);
+
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
         {
-            var s = v % 1 == 0 ? v.ToString("0") : v.ToString("0.##");
-            return s.Replace('.', ','); // NL-komma
+            decimal d = _rng.Next(5, 26) / 10m;
+            Add(correct + (_rng.Next(2) == 0 ? -d : d));
         }
 
-        // Shuffle helper
-        private static void Shuffle<T>(IList<T> list, Random rng)
-        {
-            for (int i = list.Count - 1; i > 0; i--)
-            {
-                int j = rng.Next(i + 1);
-                (list[i], list[j]) = (list[j], list[i]);
-            }
-        }
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
 
-        public Question Generate(ProblemType? forcedType = null)
-        {
-            var type = forcedType ?? RandomEnum<ProblemType>();
-            return type switch
-            {
-                ProblemType.FractionDivideByInteger => GenFractionDivideByInteger(),
-                ProblemType.FractionMultiplyByInteger => GenFractionMultiplyByInteger(),
-                ProblemType.FractionAdd => GenFractionAddSub(add: true),
-                ProblemType.FractionSubtract => GenFractionAddSub(add: false),
-                ProblemType.FractionMultiply => GenFractionMulDiv(multiply: true),
-                ProblemType.FractionDivide => GenFractionMulDiv(multiply: false),
-                ProblemType.FractionSimplify => GenFractionSimplify(),
-                ProblemType.PercentageOfNumber => GenPercentageOfNumber(),
-                ProblemType.PartOfNumber => GenPartOfNumber(),
-                ProblemType.RatioProportion => GenRatioProportion(),
-                ProblemType.SquaresRoots => GenSquaresRoots(),
-                ProblemType.OrderOfOperations => GenOrderOfOperations(),
-                ProblemType.NegativesWithBrackets => GenNegativesWithBrackets(),
-                ProblemType.MixedToImproper => GenMixedToImproper(),
-                ProblemType.ImproperToMixed => GenImproperToMixed(),
-                ProblemType.WorkRateTogether => GenWorkRateTogether(),
-                // NIEUW:
-                ProblemType.ProportionSameUnknown => GenProportionSameUnknown(),
-                _ => GenFractionDivideByInteger()
-            };
-        }
+        string qText = $"{p}% van ? = {FmtDec(M)}";
+        string explanation = $"Geheel = {FmtDec(M)} ÷ ({FmtPct(p)}%) = {FmtDec(M)} ÷ ({p}/100) = {correctS}.";
 
-        // ----------------- Generators -----------------
-        private Question GenFractionDivideByInteger()
-        {
-            var (n, d) = RandProperFraction();
-            int k = RandIn(2, 9);
-            Frac ans = new Frac(n, d) / Frac.FromInt(k);
+        return new Question(qText, correctS, list, explanation, ProblemType.Percentage_FindBase);
+    }
 
-            var q = $"{n}/{d} ÷ {k} = ?";
-            var expl = $"Delen door {k} = vermenigvuldigen met 1/{k}: {n}/{d} × 1/{k} = {ans}.";
-
-            var options = UniqueOptions(
-                ans.ToString(),
-                new Frac(n * k, d).ToString(),
-                new Frac(n, d * k * k).ToString(),
-                new Frac(d, n * k).ToString()
-            );
-            return new Question(q, ans.ToString(), options, expl, ProblemType.FractionDivideByInteger);
-        }
-
-        private Question GenFractionMultiplyByInteger()
-        {
-            var (n, d) = RandProperFraction();
-            int k = RandIn(2, 9);
-            Frac ans = new Frac(n, d) * Frac.FromInt(k);
-
-            var q = $"{n}/{d} × {k} = ?";
-            var expl = $"Vermenigvuldig teller met {k}: {n}×{k}/{d} = {ans}.";
-
-            var options = UniqueOptions(
-                ans.ToString(),
-                new Frac(n, d * k).ToString(),
-                new Frac(n * k * k, d).ToString(),
-                new Frac(d * k, n).ToString()
-            );
-            return new Question(q, ans.ToString(), options, expl, ProblemType.FractionMultiplyByInteger);
-        }
-
-        private Question GenFractionAddSub(bool add)
-        {
-            var a = RandNiceFraction();
-            var b = RandNiceFraction();
-            if (a.D == b.D && a.N == b.N) b = new Frac(b.N + 1, b.D);
-
-            Frac ans = add ? a + b : a - b;
-            string op = add ? "+" : "−";
-            var q = $"{a} {op} {b} = ?";
-            var expl = $"Maak gelijke noemers en vereenvoudig: {a} {op} {b} = {ans}.";
-
-            var options = UniqueOptions(
-                ans.ToString(),
-                new Frac(add ? a.N + b.N : a.N - b.N, a.D).ToString(),
-                new Frac(add ? a.N + b.N : a.N - b.N, b.D).ToString(),
-                new Frac(add ? a.N * b.D + b.N * a.D : a.N * b.D - b.N * a.D, a.D + b.D).ToString()
-            );
-            return new Question(q, ans.ToString(), options, expl, add ? ProblemType.FractionAdd : ProblemType.FractionSubtract);
-        }
-
-        private Question GenFractionMulDiv(bool multiply)
-        {
-            var a = RandNiceFraction();
-            var b = RandNiceFraction();
-            Frac ans = multiply ? a * b : a / b;
-            string op = multiply ? "×" : "÷";
-            var q = $"{a} {op} {b} = ?";
-            var expl = multiply
-                ? $"Tellers× en noemers× → {ans}."
-                : $"Delen door breuk = keer omgekeerde: {a} × {new Frac(b.D, b.N)} = {ans}.";
-
-            var options = UniqueOptions(
-                ans.ToString(),
-                new Frac(a.N * b.D, a.D * b.N).ToString(),
-                new Frac(a.N * b.N, a.D + b.D).ToString(),
-                new Frac(a.N + b.N, a.D * b.D).ToString()
-            );
-            return new Question(q, ans.ToString(), options, expl, multiply ? ProblemType.FractionMultiply : ProblemType.FractionDivide);
-        }
-
-        private Question GenFractionSimplify()
-        {
-            int g = RandIn(2, 12);
-            int n = g * RandIn(2, 9);
-            int d = g * RandIn(2, 9);
-            var original = $"{n}/{d}";
-            Frac ans = new Frac(n, d);
-
-            var q = $"Vereenvoudig: {original}";
-            var expl = $"Deel teller/noemer door {Frac.Gcd(n, d)} → {ans}.";
-
-            var options = UniqueOptions(
-                ans.ToString(),
-                $"{n}/{d}",
-                new Frac(n / 2, d / 2).ToString(),
-                new Frac(n / 3, d).ToString()
-            );
-            return new Question(q, ans.ToString(), options, expl, ProblemType.FractionSimplify);
-        }
-
-        private Question GenPercentageOfNumber()
-        {
-            // voorbeeldpercenten, voeg gerust meer toe
-            int p = new[] { 5, 10, 12, 15, 20, 25, 30, 40, 50, 60, 75, 80, 90 }[_rng.Next(13)];
-            int baseN = _rng.Next(40, 401);  // 40..400
-
-            decimal correct = baseN * p / 100m;
-            string correctS = FmtDec(correct);
-
-            // Gebruik HashSet met stringvergelijking na formattering,
-            // zodat we geen duplicaten krijgen door afronding/format.
-            var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    /* ============= 4) A is ?% van B ============= */
+    private Question GenWhatPercentOfNumber()
     {
-        correctS
-    };
+        int B = _rng.Next(40, 401);                   // geheel
+        int[] numerators = { 1, 2, 3, 4, 5, 6, 8, 9 }; // A ≈ nette breuken van B
+        int k = numerators[_rng.Next(numerators.Length)];
+        int A = Math.Max(1, B / k);
 
-            // Typische afleiderpatronen
-            void AddOpt(decimal v)
+        decimal correct = 100m * A / B;
+        string correctS = FmtPct(correct) + " %";
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+
+        string ToPct(decimal v) => FmtPct(v) + " %";
+        void AddPct(decimal v)
+        {
+            var s = ToPct(v);
+            if (!opts.Contains(s)) opts.Add(s);
+        }
+
+        // --- 1) Offsets met kleine jitter (breekt identieke decimalen) ---
+        decimal Jitter() => (_rng.Next(2) == 0 ? -1 : 1) * (_rng.Next(2, 6) / 100m); // ±0,02 .. ±0,05
+        AddPct(correct + 1m + Jitter());
+        AddPct(correct - 1m + Jitter());
+        AddPct(correct + 5m + Jitter());
+        AddPct(correct - 5m + Jitter());
+
+        // --- 2) Ratio slips: verander teller/noemer met 1 ---
+        if (A + 1 <= B - 1) AddPct(100m * (A + 1) / B);
+        if (A - 1 >= 1) AddPct(100m * (A - 1) / B);
+        if (B + 1 > 0) AddPct(100m * A / (B + 1));
+        if (B - 1 > 0) AddPct(100m * A / (B - 1));
+
+        // --- 3) Rounding varianten (naar integer / 1 decimaal) ---
+        AddPct(Math.Round(correct, 0));               // afgerond op hele %
+        AddPct(Math.Round(correct, 1));               // 1 decimaal
+
+        // Vul aan tot 4 met kleine willekeurige variaties
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
+        {
+            decimal d = (_rng.Next(5, 26) / 10m);     // 0,5 .. 2,5
+            decimal sign = _rng.Next(2) == 0 ? -1m : 1m;
+            AddPct(correct + sign * d + Jitter());
+        }
+
+        // Maak lijst en shuffle
+        var list = opts.ToList();
+        Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+
+        // Safety net: correct erin
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        // --- 4) Enforce: niet alle dezelfde decimalen ---
+        // verzamel decimal-suffix (2 cijfers na komma) indien aanwezig
+        string DecPart(string s)
+        {
+            int i = s.IndexOf(',');
+            if (i < 0) return "";
+            var p = s.IndexOf(' ', i);
+            var frac = p < 0 ? s[(i + 1)..] : s[(i + 1)..p];
+            return frac; // bv. "22"
+        }
+
+        var decSet = new HashSet<string>(list.Select(DecPart).Where(x => x.Length > 0));
+        if (decSet.Count <= 1)
+        {
+            // Forceer minstens één optie met andere decimalen
+            for (int i = 0; i < list.Count; i++)
             {
-                var s = FmtDec(v);
-                if (!opts.Contains(s)) opts.Add(s);
-            }
-
-            // ±1 (afrond/inschattingsfout)
-            AddOpt(correct + 1m);
-            AddOpt(correct - 1m);
-
-            // ±5 en ±10 %-punt verwisseling
-            AddOpt(baseN * (p + 5) / 100m);
-            AddOpt(baseN * (p - 5) / 100m);
-            AddOpt(baseN * (p + 10) / 100m);
-            AddOpt(baseN * (p - 10) / 100m);
-
-            // Denkfout: delen door p i.p.v. 100
-            if (p != 0) AddOpt(baseN / (decimal)p);
-
-            // Vul tot 4 opties met kleine variaties rond het juiste antwoord,
-            // steeds checkend op duplicaat na formattering.
-            int guard = 0;
-            while (opts.Count < 4 && guard++ < 50)
-            {
-                // variatie: ±(0.5 .. 2.5)
-                decimal delta = (decimal)_rng.Next(5, 26) / 10m;
-                AddOpt(correct + (_rng.Next(2) == 0 ? -delta : delta));
-            }
-
-            // Zorg dat we exact 4 opties hebben (1 correct + 3 afleiders)
-            var list = new List<string>(opts);
-            Shuffle(list, _rng);
-
-            if (!list.Contains(correctS))
-                list[0] = correctS; // veiligheidsnet (zou niet moeten gebeuren)
-
-            // Beperk tot 4 en shuffle nog een keer
-            if (list.Count > 4) list = list.Take(4).ToList();
-            Shuffle(list, _rng);
-
-            string qText = $"{p}% van {baseN} = ?";
-            string explanation = $"{baseN} × {p}/100 = {correctS}.";
-
-            return new Question(qText, correctS, list, explanation, ProblemType.PercentageOfNumber);
-        }
-
-
-        private Question GenPartOfNumber()
-        {
-            var (n, d) = RandProperFraction(maxDen: 12);
-            int whole = RandIn(48, 240, step: 6);
-            whole = (whole / d) * d;
-            int ans = whole * n / d;
-
-            string q = $"{n}/{d} van {whole} = ?";
-            string expl = $"{whole} × {n}/{d} = {whole * n}/{d} = {ans}.";
-
-            var options = UniqueOptions(
-                ans.ToString(),
-                (whole * d / n).ToString(),
-                (whole * n).ToString(),
-                (whole / d).ToString()
-            );
-            return new Question(q, ans.ToString(), options, expl, ProblemType.PartOfNumber);
-        }
-
-        private Question GenRatioProportion()
-        {
-            int a = RandIn(2, 12);
-            int b = RandIn(2, 12);
-            int d = RandIn(8, 40);
-            int lcm = Lcm(b, RandIn(2, 6));
-            d = Math.Max(lcm, (d / lcm) * lcm);
-            int x = a * d / b;
-
-            string q = $"{a}:{b} = x:{d}.  Wat is x?";
-            string expl = $"x = {a}×{d}/{b} = {x}.";
-
-            var options = UniqueOptions(
-                x.ToString(),
-                (b * d / a).ToString(),
-                (a + d).ToString(),
-                (a * b).ToString()
-            );
-            return new Question(q, x.ToString(), options, expl, ProblemType.RatioProportion);
-        }
-
-        private Question GenSquaresRoots()
-        {
-            bool root = _rng.NextDouble() < 0.5;
-            if (root)
-            {
-                int n = new[] { 81, 100, 121, 144, 169, 196, 225, 256, 289, 324 }.OrderBy(_ => _rng.Next()).First();
-                int ans = (int)Math.Round(Math.Sqrt(n));
-                string q = $"√{n} = ?";
-                var options = UniqueOptions(
-                    ans.ToString(), (ans - 1).ToString(), (ans + 1).ToString(), (n / 2).ToString()
-                );
-                return new Question(q, ans.ToString(), options, $"√{n} = {ans} omdat {ans}² = {n}.", ProblemType.SquaresRoots);
-            }
-            else
-            {
-                int n = RandIn(9, 18);
-                int ans = n * n;
-                string q = $"{n}² = ?";
-                var options = UniqueOptions(
-                    ans.ToString(), (n * (n + 1)).ToString(), (n * (n - 1)).ToString(), (2 * n).ToString()
-                );
-                return new Question(q, ans.ToString(), options, $"{n}² = {n}×{n} = {ans}.", ProblemType.SquaresRoots);
-            }
-        }
-
-        private Question GenOrderOfOperations()
-        {
-            int a = RandIn(5, 20);
-            int b = RandIn(2, 9);
-            int c = RandIn(2, 9);
-            int d = RandIn(1, 10);
-
-            int ans = a + b * c - d;
-
-            string q = $"{a} + {b} × {c} − {d} = ?";
-            string expl = $"Eerst ×: {b}×{c} = {b * c}; dan {a} + {b * c} − {d} = {ans}.";
-
-            var options = UniqueOptions(
-                ans.ToString(),
-                (a + b + c - d).ToString(),
-                ((a + b) * c - d).ToString(),
-                (a + b * c + d).ToString()
-            );
-            return new Question(q, ans.ToString(), options, expl, ProblemType.OrderOfOperations);
-        }
-
-        // ----------------- NIEUW: a/? = ?/b -----------------
-        private Question GenProportionSameUnknown()
-        {
-            // Kies oplossing x, en kies a als een delers van x^2 (zodat b = x^2/a geheel is)
-            int x = RandIn(4, 20);
-            int xsq = x * x;
-
-            // Bepaal alle delers van x^2 (excl. 1 en x^2 voor iets interessantere opgaven)
-            var divisors = Enumerable.Range(2, xsq - 2)
-                                     .Where(d => xsq % d == 0)
-                                     .ToList();
-            if (divisors.Count == 0) divisors.Add(2); // safety
-
-            int a = divisors[_rng.Next(divisors.Count)];
-            int b = xsq / a;
-
-            bool mirrored = _rng.NextDouble() < 0.5;
-            string q = mirrored
-                ? $"Los op: ?/{a} = {b}/?"
-                : $"Los op: {a}/? = ?/{b}";
-
-            string expl = $"Noem het onbekende x. Dan geldt x² = {a}·{b} = {xsq} ⇒ x = √{xsq} = {x}.";
-
-            var options = UniqueOptions(
-                x.ToString(),        // juist
-                a.ToString(),        // verwar met a
-                b.ToString(),        // verwar met b
-                (2 * x).ToString()   // te groot (×2)
-            );
-
-            return new Question(q, x.ToString(), options, expl, ProblemType.ProportionSameUnknown);
-        }
-
-        // ----------------- Extra typen van eerder -----------------
-        private Question GenNegativesWithBrackets()
-        {
-            int a = RandIn(2, 12);
-            int b = RandIn(2, 9);
-            int c = RandIn(1, 9);
-            int d = RandIn(1, 9);
-
-            bool variant = _rng.NextDouble() < 0.5;
-            int ans;
-            string q;
-            string expl;
-
-            if (variant)
-            {
-                ans = -a + b * (c - d);
-                q = $"−{a} + {b} × ({c} − {d}) = ?";
-                expl = $"Eerst haakjes: ({c}−{d}) = {c - d}; dan {b}×{c - d}; daarna optellen met −{a} → {ans}.";
-            }
-            else
-            {
-                ans = (a - b) - (-c) * d;
-                q = $"({a} − {b}) − (−{c}) × {d} = ?";
-                expl = $"(−{c})×{d} = −{c * d}. Dus ({a}−{b}) − (−{c * d}) = ({a - b}) + {c * d} = {ans}.";
-            }
-
-            var options = UniqueOptions(
-                ans.ToString(),
-                (-ans).ToString(),
-                (ans + RandIn(-3, 3)).ToString(),
-                (a + b * (c - d)).ToString()
-            );
-            return new Question(q, ans.ToString(), options, expl, ProblemType.NegativesWithBrackets);
-        }
-
-        private static string FormatMixed(int whole, Frac proper)
-            => proper.N == 0 ? $"{whole}" : (whole == 0 ? proper.ToString() : $"{whole} {proper}");
-
-        private Question GenMixedToImproper()
-        {
-            int whole = RandIn(1, 9);
-            var (n, d) = RandProperFraction(maxDen: 12);
-            var proper = new Frac(n, d);
-            var improper = new Frac(whole * d + n, d);
-
-            string q = $"Zet om naar onzuivere breuk: {FormatMixed(whole, proper)} = ?";
-            string expl = $"{whole} {n}/{d} = ({whole}×{d}+{n})/{d} = {improper}.";
-
-            var options = UniqueOptions(
-                improper.ToString(),
-                new Frac(whole * n + d, d).ToString(),
-                new Frac(whole * d - n, d).ToString(),
-                $"{whole}{proper}"
-            );
-            return new Question(q, improper.ToString(), options, expl, ProblemType.MixedToImproper);
-        }
-
-        private Question GenImproperToMixed()
-        {
-            int d = RandIn(3, 12);
-            int k = RandIn(1, 5);
-            int n = d * k + RandIn(1, d - 1);
-            var f = new Frac(n, d);
-            var (w, prop) = f.ToMixed();
-
-            string q = $"Zet om naar gemengde breuk: {f} = ?";
-            string expl = $"{n}/{d} = {w} en rest {prop.N}/{prop.D} → {FormatMixed(w, prop)}.";
-
-            var options = UniqueOptions(
-                FormatMixed(w, prop),
-                new Frac(n - d, d).ToString(),
-                $"{w}/{prop}",
-                $"{prop} {w}"
-            );
-            return new Question(q, FormatMixed(w, prop), options, expl, ProblemType.ImproperToMixed);
-        }
-
-        private Question GenWorkRateTogether()
-        {
-            int a = new[] { 2, 3, 4, 5 }.OrderBy(_ => _rng.Next()).First();
-            int b = new[] { 3, 4, 6, 8, 9, 10 }.OrderBy(_ => _rng.Next()).First();
-            int k = new[] { 1, 2, 3 }.OrderBy(_ => _rng.Next()).First();
-            int t1 = a * k;
-            int t2 = b * k;
-
-            int denom = a + b;
-            int numer = a * b * k;
-            int t = (numer % denom == 0) ? numer / denom : (a * b * k * 2) / (a + b);
-            string unit = "uur";
-
-            string q = $"Persoon A kan een klus in {t1} {unit} doen en persoon B in {t2} {unit}. Hoe lang duurt het samen (constante snelheid)?";
-            string expl = $"1/t = 1/{t1} + 1/{t2} ⇒ t = {t1}×{t2}/({t1}+{t2}) = {t} {unit}.";
-
-            var options = UniqueOptions(
-                $"{t} {unit}",
-                $"{t1 + t2} {unit}",
-                $"{Math.Max(t1, t2)} {unit}",
-                $"{t1 * t2} {unit}"
-            );
-            return new Question(q, $"{t} {unit}", options, expl, ProblemType.WorkRateTogether);
-        }
-
-        // ----------------- Utilities -----------------
-        private static int Lcm(int a, int b) => a / Frac.Gcd(a, b) * b;
-
-        private (int n, int d) RandProperFraction(int maxDen = 15)
-        {
-            int d = RandIn(3, maxDen);
-            int n = RandIn(1, d - 1);
-            return (n, d);
-        }
-
-        private Frac RandNiceFraction()
-        {
-            int d = RandIn(2, 12);
-            int n = RandIn(-12, 12);
-            if (n == 0) n = 1;
-            return new Frac(n, d);
-        }
-
-        private int RandIn(int minInclusive, int maxInclusive, int step = 1)
-        {
-            int count = ((maxInclusive - minInclusive) / step) + 1;
-            return minInclusive + step * _rng.Next(count);
-        }
-
-        private T RandomEnum<T>() where T : Enum
-        {
-            var values = Enum.GetValues(typeof(T));
-            return (T)values.GetValue(_rng.Next(values.Length));
-        }
-
-        // Altijd 4 unieke opties, daarna schudden
-        private IReadOnlyList<string> UniqueOptions(params string[] seeds)
-        {
-            string Norm(string s) =>
-                (s ?? "").Trim().Replace(" ", "").Replace(",", ".").ToLowerInvariant();
-
-            var opts = new List<string>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            void TryAdd(string s)
-            {
-                if (string.IsNullOrWhiteSpace(s)) return;
-                var key = Norm(s);
-                if (seen.Add(key)) opts.Add(s);
-            }
-
-            foreach (var s in seeds) TryAdd(s);
-
-            while (opts.Count < 4)
-            {
-                var baseStr = opts.Count > 0 ? opts[^1] : seeds.FirstOrDefault() ?? "0";
-
-                string MakeVariant(string s)
+                if (list[i] == correctS) continue;
+                // parse % waarde terug naar decimal
+                var raw = list[i].Replace(" %", "");
+                if (decimal.TryParse(raw.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var val))
                 {
-                    var t = s.Trim();
-                    bool hasHour = t.EndsWith(" uur", StringComparison.OrdinalIgnoreCase);
-                    var core = hasHour ? t[..^4].Trim() : t;
-
-                    if (int.TryParse(core, out int iv))
-                    {
-                        int delta;
-                        string candidate;
-                        do
-                        {
-                            delta = RandIn(-4, 4);
-                            if (delta == 0) delta = 1;
-                            candidate = (iv + delta) + (hasHour ? " uur" : "");
-                        } while (seen.Contains(Norm(candidate)));
-                        return candidate;
-                    }
-
-                    var parts = core.Split('/');
-                    if (parts.Length == 2 &&
-                        int.TryParse(parts[0], out int a) &&
-                        int.TryParse(parts[1], out int b) && b != 0)
-                    {
-                        int na = a, nb = b;
-                        if (_rng.NextDouble() < 0.5)
-                        {
-                            do { na = a + (_rng.Next(2) == 0 ? -1 : 1); } while (na == 0);
-                        }
-                        else
-                        {
-                            do { nb = b + (_rng.Next(2) == 0 ? -1 : 1); } while (nb == 0);
-                        }
-                        var v = new Frac(na, nb).ToString();
-                        if (!seen.Contains(Norm(v))) return v;
-                    }
-
-                    string alt = t + "'";
-                    int tries = 0;
-                    while (seen.Contains(Norm(alt)) && tries++ < 5) alt += "'";
-                    return alt;
+                    val += 0.13m; // kleine verschuiving om decimalen te breken
+                    list[i] = ToPct(val);
+                    break;
                 }
-
-                TryAdd(MakeVariant(baseStr));
-
-                if (opts.Count < 4 && seeds.Length > 0)
-                    TryAdd(MakeVariant(seeds[0]));
             }
-
-            for (int i = opts.Count - 1; i > 0; i--)
-            {
-                int j = _rng.Next(i + 1);
-                (opts[i], opts[j]) = (opts[j], opts[i]);
-            }
-            return opts;
         }
+
+        string qText = $"{FmtDec(A)} is ?% van {FmtDec(B)}";
+        string explanation = $"p = 100 × {FmtDec(A)}/{FmtDec(B)} = {FmtPct(correct)} %.";
+
+        return new Question(qText, correctS, list, explanation, ProblemType.Percentage_WhatPercent);
+    }
+
+
+    /* ============= 5) Breuk × geheel ============= */
+    private Question GenFractionTimesInteger()
+    {
+        var (num, den) = RandProperFraction(3, 12, allowNegative: false);
+        int n = _rng.Next(2, 13);
+        string qText = $"{num}/{den} × {n} = ?";
+
+        string correctS = FractionToNiceDecimal(num * n, den);
+        var correctVal = (decimal)(num * n) / den;
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void Add(decimal v) { var s = FmtDec(v); if (!opts.Contains(s)) opts.Add(s); }
+
+        Add((decimal)n / den * num);   // fout: n/den × num
+        Add((decimal)num / den + n);   // fout: optellen i.p.v. vermenigvuldigen
+        Add(correctVal + 0.5m);
+        Add(correctVal - 0.5m);
+
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
+        {
+            decimal d = _rng.Next(1, 5) / 10m;
+            Add(correctVal + (_rng.Next(2) == 0 ? -d : d));
+        }
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string explanation = $"{num}/{den} × {n} = {num}×{n}/{den} = {FmtDec(correctVal)}.";
+        return new Question(qText, correctS, list, explanation, ProblemType.Fraction_Multiply_ByInt);
+    }
+
+    /* ============= 6) Breuk ± geheel ============= */
+    private Question GenFractionPlusMinusInteger()
+    {
+        var (num, den) = RandProperFraction(3, 9, allowNegative: true);
+        int whole = _rng.Next(1, 7) * (_rng.Next(2) == 0 ? 1 : -1);
+        bool add = _rng.Next(2) == 0;
+        string op = add ? "+" : "−";
+        string qText = $"{num}/{den} {op} {whole} = ?";
+
+        decimal correctVal = add ? (decimal)num / den + whole
+                                 : (decimal)num / den - whole;
+        string correctS = FmtDec(correctVal);
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void Add(decimal v) { var s = FmtDec(v); if (!opts.Contains(s)) opts.Add(s); }
+
+        Add((decimal)num / den);
+        Add((decimal)whole);
+        Add(correctVal + 0.5m);
+        Add(correctVal - 0.5m);
+
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
+        {
+            decimal d = _rng.Next(1, 5) / 10m;
+            Add(correctVal + (_rng.Next(2) == 0 ? -d : d));
+        }
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string explanation = add
+            ? $"{num}/{den} + {whole} = {FmtDec((decimal)num / den)} + {FmtDec(whole)} = {correctS}."
+            : $"{num}/{den} − {whole} = {FmtDec((decimal)num / den)} − {FmtDec(whole)} = {correctS}.";
+
+        return new Question(qText, correctS, list, explanation, ProblemType.Fraction_Add_Int);
+    }
+
+    /* ============= 7) Breuk × breuk ============= */
+    private Question GenFractionTimesFraction()
+    {
+        var (a, b) = RandProperFraction(3, 12, allowNegative: false);
+        var (c, d) = RandProperFraction(3, 12, allowNegative: false);
+
+        string qText = $"{a}/{b} × {c}/{d} = ?";
+
+        // correct: (a*c)/(b*d)
+        string correctS = FractionToNiceDecimal(a * c, b * d);
+        decimal correctVal = (decimal)a * c / (b * d);
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void AddDec(decimal v) { var s = FmtDec(v); if (!opts.Contains(s)) opts.Add(s); }
+
+        // typische fouten:
+        AddDec((decimal)a / b + (decimal)c / d);         // optellen i.p.v. vermenigvuldigen
+        AddDec((decimal)(a * d) / (b * c));              // omkering tweede breuk vergeten (verwisseling)
+        AddDec((decimal)a / d);                          // kruis-simplificatie fout
+        AddDec((decimal)c / b);
+
+        // rond correcte waarde
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
+        {
+            decimal dlt = _rng.Next(1, 4) / 10m; // 0,1..0,3
+            AddDec(correctVal + (_rng.Next(2) == 0 ? -dlt : dlt));
+        }
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string explanation = $"{a}/{b} × {c}/{d} = {a}×{c}/{b}×{d} = {a * c}/{b * d} = {correctS}.";
+        return new Question(qText, correctS, list, explanation, ProblemType.Fraction_Multiply);
+    }
+
+    /* ============= 8) Breuk ÷ breuk ============= */
+    private Question GenFractionDivideFraction()
+    {
+        var (a, b) = RandProperFraction(3, 12, allowNegative: false);
+        var (c, d) = RandProperFraction(3, 12, allowNegative: false);
+
+        string qText = $"{a}/{b} ÷ {c}/{d} = ?";
+
+        // correct: (a/b) ÷ (c/d) = (a/b) × (d/c) = (a*d)/(b*c)
+        string correctS = FractionToNiceDecimal(a * d, b * c);
+        decimal correctVal = (decimal)a * d / (b * c);
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void AddDec(decimal v) { var s = FmtDec(v); if (!opts.Contains(s)) opts.Add(s); }
+
+        // typische fouten:
+        AddDec((decimal)a * c / (b * d)); // vergeten te inverteren: (a*c)/(b*d)
+        AddDec((decimal)a / b + (decimal)c / d);
+        AddDec((decimal)a / c);           // verkeerde kruisdeling
+
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
+        {
+            decimal dlt = _rng.Next(1, 4) / 10m;
+            AddDec(correctVal + (_rng.Next(2) == 0 ? -dlt : dlt));
+        }
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string explanation = $"{a}/{b} ÷ {c}/{d} = {a}/{b} × {d}/{c} = {a * d}/{b * c} = {correctS}.";
+        return new Question(qText, correctS, list, explanation, ProblemType.Fraction_Divide);
+    }
+
+    /* ============= 9) Breuk + breuk ============= */
+    private Question GenFractionPlusFraction()
+    {
+        var (a, b) = RandProperFraction(3, 12, allowNegative: true);
+        var (c, d) = RandProperFraction(3, 12, allowNegative: true);
+
+        string qText = $"{a}/{b} + {c}/{d} = ?";
+
+        int l = Lcm(b, d);
+        int na = a * (l / b);
+        int nc = c * (l / d);
+        int sumNum = na + nc;
+        string correctS = FractionToNiceDecimal(sumNum, l);
+        decimal correctVal = (decimal)sumNum / l;
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void AddDec(decimal v) { var s = FmtDec(v); if (!opts.Contains(s)) opts.Add(s); }
+
+        // typische fouten:
+        AddDec((decimal)(a + c) / (b + d)); // tellers + tellers, noemers + noemers
+        AddDec((decimal)a / b + (decimal)c / d + 0.5m); // inschatting
+        AddDec((decimal)a / b + (decimal)c / d - 0.5m);
+
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
+        {
+            decimal dlt = _rng.Next(1, 4) / 10m;
+            AddDec(correctVal + (_rng.Next(2) == 0 ? -dlt : dlt));
+        }
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string explanation = $"Gelijke noemer: LCM({b},{d})={l}. ⇒ {a}/{b}={na}/{l}, {c}/{d}={nc}/{l}. " +
+                             $"Som: ({na}+{nc})/{l} = {sumNum}/{l} = {correctS}.";
+        return new Question(qText, correctS, list, explanation, ProblemType.Fraction_Add);
+    }
+
+    /* ============= 10) Breuk − breuk ============= */
+    private Question GenFractionMinusFraction()
+    {
+        var (a, b) = RandProperFraction(3, 12, allowNegative: true);
+        var (c, d) = RandProperFraction(3, 12, allowNegative: true);
+
+        string qText = $"{a}/{b} − {c}/{d} = ?";
+
+        int l = Lcm(b, d);
+        int na = a * (l / b);
+        int nc = c * (l / d);
+        int diffNum = na - nc;
+        string correctS = FractionToNiceDecimal(diffNum, l);
+        decimal correctVal = (decimal)diffNum / l;
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void AddDec(decimal v) { var s = FmtDec(v); if (!opts.Contains(s)) opts.Add(s); }
+
+        // typische fouten:
+        AddDec((decimal)(a - c) / (b - d));
+        AddDec((decimal)a / b - (decimal)c / d + 0.5m);
+        AddDec((decimal)a / b - (decimal)c / d - 0.5m);
+
+        int guard = 0;
+        while (opts.Count < 4 && guard++ < 50)
+        {
+            decimal dlt = _rng.Next(1, 4) / 10m;
+            AddDec(correctVal + (_rng.Next(2) == 0 ? -dlt : dlt));
+        }
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string explanation = $"Gelijke noemer: LCM({b},{d})={l}. ⇒ {a}/{b}={na}/{l}, {c}/{d}={nc}/{l}. " +
+                             $"Verschil: ({na}−{nc})/{l} = {diffNum}/{l} = {correctS}.";
+        return new Question(qText, correctS, list, explanation, ProblemType.Fraction_Subtract);
+    }
+
+    /* ============= 11) Verhoudingen ============= */
+    private Question GenRatioCrossSolve()
+    {
+        int s = _rng.Next(3, 16);
+        int k = _rng.Next(2, 11);
+        int a = s * s;
+        int b = k * k;
+        int x = s * k;
+
+        string qText = $"Los op: {a}/? = ?/{b}";
+        string correctS = x.ToString();
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void AddInt(int v) { opts.Add(v.ToString()); }
+
+        AddInt(x + 1); AddInt(Math.Max(1, x - 1));
+        AddInt(x + 2); AddInt(Math.Max(1, x - 2));
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string explanation = $"a/x = x/b ⇒ x² = a·b ⇒ x = √(a·b) = √({a}×{b}) = {x}.";
+        return new Question(qText, correctS, list, explanation, ProblemType.Ratio_CrossSolve);
+    }
+
+    /* ============= 12) Algemene expressie ============= */
+    private Question GenArithmeticExpression()
+    {
+        int A = _rng.Next(-5, 6);
+        int B = _rng.Next(1, 6);
+        int C = _rng.Next(1, 10);
+        int D = _rng.Next(1, 10);
+
+        bool plus = _rng.Next(2) == 0;
+        string op = plus ? "+" : "−";
+
+        int inner = C - D;
+        int mult = B * inner;
+        int result = plus ? (A + mult) : (A - mult);
+
+        string qText = $"{A} {op} {B} × ({C} − {D}) = ?";
+        string correctS = result.ToString();
+
+        var opts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { correctS };
+        void AddInt(int v) { opts.Add(v.ToString()); }
+
+        int wrong1 = plus ? (A + B + inner) : (A - B + inner);
+        int wrong2 = plus ? (A + B * (C + D)) : (A - B * (C + D));
+        int wrong3 = plus ? (A + (B * C) - D) : (A - (B * C) - D);
+
+        AddInt(wrong1); AddInt(wrong2); AddInt(wrong3);
+        AddInt(result + _rng.Next(-4, 5));
+
+        var list = opts.ToList(); Shuffle(list, _rng);
+        if (list.Count > 4) list = list.Take(4).ToList();
+        if (!list.Contains(correctS)) { list[0] = correctS; Shuffle(list, _rng); }
+
+        string explanation =
+            $"Eerst haakjes: ({C} − {D}) = {inner}. " +
+            $"Dan vermenigvuldigen: {B} × {inner} = {mult}. " +
+            $"Daarna {A} {op} {mult} = {result}.";
+
+        return new Question(qText, correctS, list, explanation, ProblemType.Arithmetic_Expression);
     }
 }
